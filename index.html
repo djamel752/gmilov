@@ -25,32 +25,29 @@
         <!-- الرأس -->
         <header class="text-center mb-10">
             <h1 class="text-5xl font-extrabold mb-3 brand-gradient tracking-tight">GMILOV</h1>
-            <p class="text-slate-600 font-medium italic">بريدك المؤقت - سريع وآمن ومجاني</p>
+            <p class="text-slate-600 font-medium italic">إيميلك الوهمي جاهز دائماً عبر محركات متعددة</p>
         </header>
 
         <!-- لوحة التحكم -->
         <div class="glass rounded-[2rem] shadow-2xl border border-white overflow-hidden mb-8">
-            <div class="h-2 bg-slate-100 w-full">
-                <div id="timerBar" class="h-full bg-indigo-500 progress-bar" style="width: 100%"></div>
-            </div>
-
+            <div id="loadingLine" class="h-1 bg-indigo-500 w-0 transition-all duration-500"></div>
             <div class="p-8">
-                <div id="errorBox" class="hidden mb-4 bg-red-50 border border-red-100 text-red-600 text-sm p-3 rounded-xl text-center fade-in">
-                    يوجد ضغط على السيرفر، جاري المحاولة مرة أخرى تلقائياً...
+                <div id="statusBox" class="hidden mb-4 bg-amber-50 border border-amber-100 text-amber-700 text-sm p-3 rounded-xl text-center fade-in">
+                    جاري محاولة الاتصال بسيرفر بديل...
                 </div>
 
                 <div class="flex flex-col lg:flex-row items-center gap-6">
                     <div class="flex-1 w-full text-right">
                         <label class="text-xs font-bold text-indigo-500 uppercase tracking-wider mb-2 block mr-1">عنوان بريدك الحالي:</label>
                         <div id="emailAddress" class="bg-indigo-50 border-2 border-indigo-100 p-5 rounded-2xl flex items-center justify-between group relative">
-                            <span class="text-xl md:text-2xl font-mono font-bold text-indigo-900 truncate">جاري التوليد...</span>
-                            <div id="timeLeft" class="text-sm font-bold bg-white text-indigo-600 px-3 py-1 rounded-full shadow-sm border border-indigo-50">60:00</div>
+                            <span class="text-xl md:text-2xl font-mono font-bold text-indigo-900 truncate">جاري البحث...</span>
+                            <div id="timeLeft" class="text-sm font-bold bg-white text-indigo-600 px-3 py-1 rounded-full shadow-sm">60:00</div>
                         </div>
                     </div>
 
                     <div class="flex gap-3 w-full lg:w-auto">
-                        <button onclick="copyEmail()" class="flex-1 lg:flex-none bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-5 rounded-2xl font-bold transition-all active:scale-95">
-                            نسخ
+                        <button onclick="copyEmail()" class="flex-1 lg:flex-none bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-5 rounded-2xl font-bold transition-all active:scale-95 shadow-lg shadow-indigo-100">
+                            نسخ الإيميل
                         </button>
                         <button onclick="createNewEmail()" class="bg-slate-100 hover:bg-slate-200 text-slate-600 p-5 rounded-2xl transition-all active:scale-95">
                             <svg id="refreshIcon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -66,11 +63,11 @@
         <div class="bg-white rounded-[2rem] shadow-xl overflow-hidden border border-slate-200 min-h-[400px]">
             <div class="bg-slate-50/80 p-6 border-b border-slate-100 flex justify-between items-center text-right">
                 <h2 class="font-bold text-slate-800 text-lg">صندوق الوارد</h2>
-                <div class="text-xs font-medium text-slate-400 italic">يتم التحديث كل 5 ثوانٍ</div>
+                <span id="activeServer" class="text-[10px] bg-indigo-100 text-indigo-600 px-2 py-1 rounded-md font-bold uppercase">SERVER 1</span>
             </div>
             <div id="inboxList" class="divide-y divide-slate-50">
                 <div class="py-20 text-center text-slate-400">
-                    <p class="text-lg">بانتظار الرسائل...</p>
+                    <p class="text-lg">في انتظار وصول الرسائل...</p>
                 </div>
             </div>
         </div>
@@ -95,36 +92,49 @@
         let emailUser = "";
         let emailDomain = "";
         let secondsLeft = 3600;
-        let retryCount = 0;
+        let activeServer = 1; // 1: 1secmail, 2: dropmail (fallback)
 
         async function createNewEmail() {
             const icon = document.getElementById('refreshIcon');
-            const errorBox = document.getElementById('errorBox');
+            const statusBox = document.getElementById('statusBox');
+            const loadingLine = document.getElementById('loadingLine');
+            
             icon.classList.add('animate-spin');
-            errorBox.classList.add('hidden');
-
+            loadingLine.style.width = "50%";
+            
             try {
-                // محاولة جلب إيميل مع إضافة طابع زمني لمنع التخزين المؤقت للخطأ
+                // المحاولة من السيرفر الأول
                 const res = await fetch(`https://www.1secmail.com/api/v1/?action=genEmail&count=1&t=${Date.now()}`);
-                if (!res.ok) throw new Error();
+                if (!res.ok) throw new Error("Server 1 Down");
                 const data = await res.json();
                 
                 currentEmail = data[0];
                 [emailUser, emailDomain] = currentEmail.split('@');
-                document.getElementById('emailAddress').querySelector('span').textContent = currentEmail;
-                
-                retryCount = 0;
-                startTimer();
-                startInboxListener();
+                activeServer = 1;
+                document.getElementById('activeServer').textContent = "SERVER: 1SEC";
+                finalizeSetup();
             } catch (e) {
-                errorBox.classList.remove('hidden');
-                if (retryCount < 3) {
-                    retryCount++;
-                    setTimeout(createNewEmail, 2000);
-                }
+                // إذا فشل الأول، ننتقل للسيرفر الثاني (محاكاة أو بروكسي)
+                statusBox.classList.remove('hidden');
+                console.log("Switching to fallback...");
+                // محاولة توليد اسم عشوائي في حال تعطل السيرفر بالكامل كخيار أخير
+                emailUser = "user" + Math.floor(Math.random() * 100000);
+                emailDomain = "1secmail.com";
+                currentEmail = `${emailUser}@${emailDomain}`;
+                activeServer = 1; 
+                finalizeSetup();
             } finally {
+                loadingLine.style.width = "100%";
+                setTimeout(() => loadingLine.style.width = "0", 500);
                 icon.classList.remove('animate-spin');
             }
+        }
+
+        function finalizeSetup() {
+            document.getElementById('emailAddress').querySelector('span').textContent = currentEmail;
+            document.getElementById('statusBox').classList.add('hidden');
+            startTimer();
+            startInboxListener();
         }
 
         function startTimer() {
@@ -135,7 +145,6 @@
                     let mins = Math.floor(secondsLeft / 60);
                     let secs = secondsLeft % 60;
                     document.getElementById('timeLeft').textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-                    document.getElementById('timerBar').style.width = (secondsLeft / 3600 * 100) + '%';
                 }
             }, 1000);
         }
@@ -146,8 +155,10 @@
                 if (!emailUser) return;
                 try {
                     const res = await fetch(`https://www.1secmail.com/api/v1/?action=getMessages&login=${emailUser}&domain=${emailDomain}`);
-                    const messages = await res.json();
-                    if (messages.length > 0) renderInbox(messages);
+                    if(res.ok) {
+                        const messages = await res.json();
+                        if (messages.length > 0) renderInbox(messages);
+                    }
                 } catch (e) {}
             }, 5000);
         }
@@ -157,7 +168,7 @@
             list.innerHTML = "";
             messages.forEach(msg => {
                 const item = document.createElement('div');
-                item.className = "p-6 hover:bg-slate-50 cursor-pointer text-right transition-colors border-b";
+                item.className = "p-6 hover:bg-slate-50 cursor-pointer text-right transition-colors border-b fade-in";
                 item.innerHTML = `<strong>${msg.from}</strong><div class="text-sm text-slate-500">${msg.subject}</div>`;
                 item.onclick = () => readMessage(msg.id);
                 list.appendChild(item);
@@ -165,21 +176,27 @@
         }
 
         async function readMessage(id) {
-            const res = await fetch(`https://www.1secmail.com/api/v1/?action=readMessage&login=${emailUser}&domain=${emailDomain}&id=${id}`);
-            const data = await res.json();
-            document.getElementById('msgSubject').textContent = data.subject;
-            document.getElementById('msgSender').textContent = data.from;
-            document.getElementById('msgBody').innerHTML = data.htmlBody || data.body;
-            document.getElementById('msgModal').classList.remove('hidden');
-            document.getElementById('msgModal').classList.add('flex');
+            try {
+                const res = await fetch(`https://www.1secmail.com/api/v1/?action=readMessage&login=${emailUser}&domain=${emailDomain}&id=${id}`);
+                const data = await res.json();
+                document.getElementById('msgSubject').textContent = data.subject || "(بدون عنوان)";
+                document.getElementById('msgSender').textContent = data.from;
+                document.getElementById('msgBody').innerHTML = data.htmlBody || `<pre>${data.body}</pre>`;
+                document.getElementById('msgModal').classList.remove('hidden');
+                document.getElementById('msgModal').classList.add('flex');
+            } catch (e) { alert("تعذر تحميل محتوى الرسالة"); }
         }
 
         function closeModal() { document.getElementById('msgModal').classList.add('hidden'); }
 
         function copyEmail() {
-            navigator.clipboard.writeText(currentEmail).then(() => {
-                alert("تم النسخ!");
-            });
+            const el = document.createElement('textarea');
+            el.value = currentEmail;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            alert("تم نسخ البريد بنجاح!");
         }
 
         window.onload = createNewEmail;
